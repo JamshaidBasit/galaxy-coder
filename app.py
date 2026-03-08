@@ -3,8 +3,9 @@ import sys, os, random, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from data.universe import GALAXY, ACHIEVEMENTS, CERTIFICATES, BATTLE_QUESTIONS, XP_PER_LEVEL
-from utils.state import (load_state, save_state, get_level, get_level_progress,
-                          add_xp, check_streak, award_badge, check_certificates, get_leaderboard)
+from utils.state import (load_user, save_user_progress, default_state, 
+                          get_level, get_level_progress, add_xp, check_streak, 
+                          award_badge, check_certificates, get_all_users_leaderboard)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -1483,32 +1484,30 @@ def page_certificates():
 # PAGE: LEADERBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 def page_leaderboard():
-    st.markdown("<h1 style='text-align:center;'>📊 LEADERBOARD</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center; color:#64748B; margin-bottom:24px;'>The galaxy's top coders. Will you reach #1?</p>", unsafe_allow_html=True)
-
-    lb = get_leaderboard(gs)
-    medals = {1: ("🥇", "gold"), 2: ("🥈", "silver"), 3: ("🥉", "bronze")}
-
-    for entry in lb:
-        rank = entry["rank"]
-        medal, cls = medals.get(rank, ("", ""))
-        is_me = "⭐" in entry["name"]
-        row_cls = cls if cls else ("me" if is_me else "")
-        st.markdown(f"""
-        <div class="lb-row {row_cls}">
-          <div style="font-size:22px; min-width:32px;">{medal or f'#{rank}'}</div>
-          <div style="font-size:22px;">{entry['avatar']}</div>
-          <div style="flex:1;">
-            <div style="font-weight:{'800' if is_me else '600'}; font-size:15px; color:{'#38BDF8' if is_me else '#E2E8F0'};">{entry['name']}</div>
-            <div style="font-size:11px; color:#475569;">{entry.get('planet','')}</div>
-          </div>
-          <div style="text-align:right;">
-            <div style="font-family:'Orbitron',sans-serif; color:#FBBF24; font-size:16px; font-weight:700;">{entry['xp']:,} XP</div>
-            <div style="font-size:11px; color:#64748B;">Level {entry['level']}</div>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-
+    st.title("🏆 Galactic Leaderboard")
+    st.subheader("Top Space Cadets in the Universe")
+    
+    # Humne utils/state.py mein jo naya function banaya hai usay use karenge
+    leaderboard_data = get_all_users_leaderboard()
+    
+    if leaderboard_data:
+        import pandas as pd
+        df_lb = pd.DataFrame(leaderboard_data)
+        
+        # Table ko thora pyara dikhane ke liye
+        st.table(df_lb[['rank', 'avatar', 'username', 'level', 'xp']].set_index('rank'))
+        
+        # User ki apni rank highlight karna
+        try:
+            my_username = st.session_state.gs['username']
+            # Check if user is in the list
+            my_info = next((item for item in leaderboard_data if item["username"] == my_username), None)
+            if my_info:
+                st.info(f"🚀 Commander **{my_username}**, aapki current rank **#{my_info['rank']}** hai!")
+        except:
+            pass
+    else:
+        st.write("🌌 Galaxy khali hai... pehla kadam aap uthayein!")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: SETTINGS
@@ -1971,23 +1970,69 @@ def page_projects():
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN ROUTER
 # ══════════════════════════════════════════════════════════════════════════════
-# Always render sidebar (shows on all pages including onboarding)
+
+# 1. Authentication Check (Check karein ke kya user login hai)
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+# 2. Agar login nahi hai, toh sirf Onboarding/Login screen dikhayein
+if not st.session_state.authenticated:
+    st.title("🚀 Galaxy Coder: System Access")
+    st.subheader("Welcome Cadet! Identify yourself to enter the universe.")
+    
+    # Login aur Sign Up ke liye do Tabs
+    tab1, tab2 = st.tabs(["🔐 Commander Login", "🌟 New Cadet Sign-Up"])
+    
+    with tab1:
+        u_login = st.text_input("Enter your Registered Name", key="login_name")
+        if st.button("Resume Mission"):
+            user_data = load_user(u_login) # Google Sheets se data check hoga
+            if user_data:
+                st.session_state.gs = user_data
+                st.session_state.authenticated = True
+                st.success(f"Welcome back, Commander {u_login}!")
+                st.rerun()
+            else:
+                st.error("Access Denied! Name not found in database.")
+
+    with tab2:
+        u_signup = st.text_input("Choose a Unique Name", key="signup_name")
+        if st.button("Initialize Profile"):
+            if u_signup:
+                if load_user(u_signup): # Check karein ke naam pehle se toh nahi hai
+                    st.error("This name is already claimed! Choose another identifier.")
+                else:
+                    new_gs = default_state()
+                    new_gs["username"] = u_signup
+                    save_user_progress(new_gs) # Pehli baar Google Sheet mein save
+                    st.session_state.gs = new_gs
+                    st.session_state.authenticated = True
+                    st.success(f"Profile Created! Welcome to the Galaxy, {u_signup}!")
+                    st.rerun()
+            else:
+                st.warning("Please provide a name to initialize your systems.")
+    
+    # Jab tak login na ho, app ka baqi hissa load nahi hoga
+    st.stop()
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AUTHENTICATED AREA (Sirf login ke baad dikhega)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Sidebar hamesha dikhayen taaki user pages badal sakay
 render_sidebar()
 
-if not gs.get("username"):
-    page_onboard()
-else:
-    page = st.session_state.page
+page = st.session_state.page
 
-    if page == "galaxy":         page_galaxy()
-    elif page == "planet":       page_planet()
-    elif page == "mission":      page_mission()
-    elif page == "battle":       page_battle()
-    elif page == "multiplayer":  page_multiplayer()
-    elif page == "projects":     page_projects()
-    elif page == "aria":         page_aria()
-    elif page == "achievements": page_achievements()
-    elif page == "certificates": page_certificates()
-    elif page == "leaderboard":  page_leaderboard()
-    elif page == "settings":     page_settings()
-    else:                        page_galaxy()
+if page == "galaxy":         page_galaxy()
+elif page == "planet":       page_planet()
+elif page == "mission":      page_mission()
+elif page == "battle":       page_battle()
+elif page == "multiplayer":  page_multiplayer()
+elif page == "projects":     page_projects()
+elif page == "aria":         page_aria()
+elif page == "achievements": page_achievements()
+elif page == "certificates": page_certificates()
+elif page == "leaderboard":  page_leaderboard()
+elif page == "settings":     page_settings()
+else:                        page_galaxy()
