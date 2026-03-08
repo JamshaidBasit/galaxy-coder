@@ -203,3 +203,84 @@ def get_all_users_leaderboard():
     for i, r in enumerate(records):
         r["rank"] = i + 1
     return records
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MULTIPLAYER LOBBY SYSTEM
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_all_lobbies():
+    """Lobbies wali sheet se sara data read karein"""
+    try:
+        # worksheet="lobbies" lazmi likhna hai jo aapne Sheet mein banayi hai
+        return conn.read(spreadsheet=SHEET_URL, worksheet="lobbies", ttl="0s")
+    except Exception:
+        return pd.DataFrame()
+
+def create_lobby(room_id, host_name):
+    """Naya multiplayer room banayein"""
+    df = get_all_lobbies()
+    
+    # Question selection (Randomly 5 questions pick karein)
+    from data.universe import BATTLE_QUESTIONS
+    selected_q = random.sample(BATTLE_QUESTIONS, 5)
+    q_ids = ",".join([str(q['id']) for q in selected_q])
+
+    new_lobby = {
+        "room_id": str(room_id),
+        "host_name": host_name,
+        "players": host_name, # Shuru mein sirf host hoga
+        "status": "waiting",
+        "questions": q_ids,
+        "scores": "0", # Initial score
+        "start_time": datetime.now().strftime("%H:%M:%S"),
+        "winner": ""
+    }
+
+    if df.empty:
+        df = pd.DataFrame([new_lobby])
+    else:
+        df = pd.concat([df, pd.DataFrame([new_lobby])], ignore_index=True)
+    
+    conn.update(spreadsheet=SHEET_URL, worksheet="lobbies", data=df)
+    st.cache_data.clear()
+
+def join_lobby(room_id, username):
+    """Maujooda room mein join karein (Max 4 players)"""
+    df = get_all_lobbies()
+    if df.empty: return False
+    
+    room_id = str(room_id)
+    if room_id in df['room_id'].values:
+        idx = df.index[df['room_id'] == room_id][0]
+        players = str(df.at[idx, 'players']).split(",")
+        
+        # Check if room is full or user already in
+        if len(players) < 4 and username not in players:
+            players.append(username)
+            df.at[idx, 'players'] = ",".join(players)
+            
+            # Scores list ko bhi update karein (Initial 0 add karein)
+            scores = str(df.at[idx, 'scores']).split(",")
+            scores.append("0")
+            df.at[idx, 'scores'] = ",".join(scores)
+            
+            conn.update(spreadsheet=SHEET_URL, worksheet="lobbies", data=df)
+            st.cache_data.clear()
+            return True
+    return False
+
+def get_lobby_status(room_id):
+    """Room ka live data lein (Players, Status etc.)"""
+    df = get_all_lobbies()
+    if not df.empty and str(room_id) in df['room_id'].values:
+        return df[df['room_id'] == str(room_id)].iloc[0].to_dict()
+    return None
+
+def start_lobby_battle(room_id):
+    """Host jab 'Start' click kare toh status badal dein"""
+    df = get_all_lobbies()
+    if str(room_id) in df['room_id'].values:
+        idx = df.index[df['room_id'] == str(room_id)][0]
+        df.at[idx, 'status'] = 'active'
+        conn.update(spreadsheet=SHEET_URL, worksheet="lobbies", data=df)
+        st.cache_data.clear()

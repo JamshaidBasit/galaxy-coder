@@ -1,175 +1,161 @@
 """
 Multiplayer Battle System for Galaxy Coder
-Uses a shared JSON file as simple backend (works on Streamlit Cloud too)
-For production: replace with a real database
+Converted from JSON to Google Sheets Backend
 """
-import json
-import os
+import streamlit as st
+import pandas as pd
 import time
 import random
 import hashlib
 from datetime import datetime
+from utils.state import conn, SHEET_URL
 
-BATTLE_FILE = "multiplayer_battles.json"
-LOBBY_FILE = "battle_lobby.json"
-
-def _load(path, default):
+def _load_lobby_df():
+    """Google Sheet se lobbies ka data read karein"""
     try:
-        if os.path.exists(path):
-            with open(path) as f:
-                return json.load(f)
+        return conn.read(spreadsheet=SHEET_URL, worksheet="lobbies", ttl="0s")
     except:
-        pass
-    return default
+        return pd.DataFrame()
 
-def _save(path, data):
+def _save_lobby_df(df):
+    """Google Sheet mein data update karein"""
     try:
-        with open(path, 'w') as f:
-            json.dump(data, f, indent=2)
+        conn.update(spreadsheet=SHEET_URL, worksheet="lobbies", data=df)
+        st.cache_data.clear()
         return True
     except:
         return False
 
 def create_battle_room(host_name, host_avatar, difficulty="beginner"):
-    """Create a new multiplayer battle room"""
+    """Create a new multiplayer battle room in Google Sheets"""
     room_id = hashlib.md5(f"{host_name}{time.time()}".encode()).hexdigest()[:6].upper()
-    lobby = _load(LOBBY_FILE, {})
-    lobby[room_id] = {
-        "id": room_id,
-        "host": host_name,
-        "host_avatar": host_avatar,
-        "difficulty": difficulty,
-        "status": "waiting",  # waiting / active / finished
-        "players": {
-            host_name: {
-                "name": host_name,
-                "avatar": host_avatar,
-                "score": 0,
-                "answered": [],
-                "ready": False
-            }
-        },
-        "questions": [],
-        "current_q": 0,
-        "created_at": datetime.now().isoformat(),
-        "max_players": 4
+    df = _load_lobby_df()
+    
+    # BATTLE_QUESTIONS se random sawal pick karein
+    from data.universe import BATTLE_QUESTIONS
+    q_pool = [q for q in BATTLE_QUESTIONS if q.get('difficulty') == difficulty]
+    selected_qs = random.sample(q_pool, min(5, len(q_pool)))
+    q_ids = ",".join([str(q['id']) for q in selected_qs])
+
+    new_room = {
+        "room_id": room_id,
+        "host_name": host_name,
+        "players": host_name,        # Comma separated string for Sheets
+        "status": "waiting",
+        "questions": q_ids,
+        "scores": "0",               # Initial score for host
+        "start_time": datetime.now().strftime("%H:%M:%S"),
+        "winner": ""
     }
-    _save(LOBBY_FILE, lobby)
+
+    df = pd.concat([df, pd.DataFrame([new_room])], ignore_index=True)
+    _save_lobby_df(df)
     return room_id
 
-def join_battle_room(room_id, player_name, player_avatar):
-    """Join an existing battle room"""
-    lobby = _load(LOBBY_FILE, {})
+def join_battle_room(room_id, player_name, player_avatar=None):
+    """Join an existing battle room in Google Sheets"""
+    df = _load_lobby_df()
     room_id = room_id.upper().strip()
-    if room_id not in lobby:
+    
+    if df.empty or room_id not in df['room_id'].values:
         return False, "Room not found!"
-    room = lobby[room_id]
-    if room["status"] != "waiting":
+    
+    idx = df.index[df['room_id'] == room_id][0]
+    
+    if df.at[idx, 'status'] != "waiting":
         return False, "Battle already started!"
-    if len(room["players"]) >= room["max_players"]:
+    
+    players = str(df.at[idx, 'players']).split(",")
+    if len(players) >= 4:
         return False, "Room is full!"
-    if player_name in room["players"]:
-        return True, room_id  # Already in room
-    room["players"][player_name] = {
-        "name": player_name,
-        "avatar": player_avatar,
-        "score": 0,
-        "answered": [],
-        "ready": False
-    }
-    _save(LOBBY_FILE, lobby)
+    
+    if player_name not in players:
+        players.append(player_name)
+        df.at[idx, 'players'] = ",".join(players)
+        
+        # Scores list mein bhi initial 0 add karein
+        scores = str(df.at[idx, 'scores']).split(",")
+        scores.append("0")
+        df.at[idx, 'scores'] = ",".join(scores)
+        
+        _save_lobby_df(df)
+    
     return True, room_id
 
 def get_room(room_id):
-    """Get current room state"""
-    lobby = _load(LOBBY_FILE, {})
-    return lobby.get(room_id.upper(), None)
-
-def set_player_ready(room_id, player_name, questions=None):
-    """Mark player as ready, optionally set questions"""
-    lobby = _load(LOBBY_FILE, {})
+    """Get current room state from Sheets and format it like the old JSON"""
+    df = _load_lobby_df()
     room_id = room_id.upper()
-    if room_id not in lobby:
-        return False
-    room = lobby[room_id]
-    if player_name in room["players"]:
-        room["players"][player_name]["ready"] = True
-    # Host sets questions
-    if questions and room["host"] == player_name:
-        room["questions"] = questions
-    # Check if all ready
-    all_ready = all(p["ready"] for p in room["players"].values())
-    if all_ready and len(room["questions"]) > 0:
-        room["status"] = "active"
-    _save(LOBBY_FILE, lobby)
-    return True
+    
+    if df.empty or room_id not in df['room_id'].values:
+        return None
+        
+    row = df[df['room_id'] == room_id].iloc[0]
+    
+    # Format conversion: Google Sheet string to Dictionary (taaki app.py na tootey)
+    players_list = str(row['players']).split(",")
+    scores_list = str(row['scores']).split(",")
+    
+    formatted_players = {}
+    for i, p_name in enumerate(players_list):
+        formatted_players[p_name] = {
+            "name": p_name,
+            "score": int(scores_list[i]) if i < len(scores_list) else 0,
+            "ready": True if row['status'] != "waiting" else False
+        }
+
+    return {
+        "id": row['room_id'],
+        "host": row['host_name'],
+        "status": row['status'],
+        "players": formatted_players,
+        "questions": str(row['questions']).split(","),
+        "winner": row['winner']
+    }
 
 def submit_answer(room_id, player_name, q_index, answer_idx, is_correct):
-    """Submit a player's answer"""
-    lobby = _load(LOBBY_FILE, {})
+    """Update score in Google Sheet"""
+    if not is_correct: return True
+    
+    df = _load_lobby_df()
     room_id = room_id.upper()
-    if room_id not in lobby:
-        return False
-    room = lobby[room_id]
-    if player_name not in room["players"]:
-        return False
-    player = room["players"][player_name]
-    # Only count first answer per question
-    if q_index not in player["answered"]:
-        player["answered"].append(q_index)
-        if is_correct:
-            player["score"] += 1
-    _save(LOBBY_FILE, lobby)
+    
+    if room_id in df['room_id'].values:
+        idx = df.index[df['room_id'] == room_id][0]
+        players = str(df.at[idx, 'players']).split(",")
+        scores = str(df.at[idx, 'scores']).split(",")
+        
+        if player_name in players:
+            p_idx = players.index(player_name)
+            current_score = int(scores[p_idx]) if p_idx < len(scores) else 0
+            scores[p_idx] = str(current_score + 1)
+            df.at[idx, 'scores'] = ",".join(scores)
+            _save_lobby_df(df)
     return True
 
-def get_battle_results(room_id):
-    """Get ranked results"""
-    room = get_room(room_id)
-    if not room:
-        return []
-    players = list(room["players"].values())
-    players.sort(key=lambda x: x["score"], reverse=True)
-    return players
-
-def finish_battle(room_id):
-    """Mark battle as finished"""
-    lobby = _load(LOBBY_FILE, {})
+def finish_battle(room_id, winner_name=""):
+    """Mark battle as finished in Sheets"""
+    df = _load_lobby_df()
     room_id = room_id.upper()
-    if room_id in lobby:
-        lobby[room_id]["status"] = "finished"
-        _save(LOBBY_FILE, lobby)
+    if room_id in df['room_id'].values:
+        idx = df.index[df['room_id'] == room_id][0]
+        df.at[idx, 'status'] = "finished"
+        df.at[idx, 'winner'] = winner_name
+        _save_lobby_df(df)
 
 def list_open_rooms():
-    """List all open rooms"""
-    lobby = _load(LOBBY_FILE, {})
+    """List all waiting rooms from Sheets"""
+    df = _load_lobby_df()
+    if df.empty: return []
+    
     open_rooms = []
-    now = time.time()
-    for rid, room in lobby.items():
-        if room["status"] == "waiting":
-            created = datetime.fromisoformat(room["created_at"]).timestamp()
-            # Only show rooms created in last 30 minutes
-            if now - created < 1800:
-                open_rooms.append({
-                    "id": rid,
-                    "host": room["host"],
-                    "players": len(room["players"]),
-                    "difficulty": room["difficulty"]
-                })
+    waiting_rooms = df[df['status'] == 'waiting']
+    
+    for _, row in waiting_rooms.iterrows():
+        open_rooms.append({
+            "id": row['room_id'],
+            "host": row['host_name'],
+            "players": len(str(row['players']).split(",")),
+            "difficulty": "standard"
+        })
     return open_rooms
-
-def cleanup_old_rooms():
-    """Remove rooms older than 2 hours"""
-    lobby = _load(LOBBY_FILE, {})
-    now = time.time()
-    to_remove = []
-    for rid, room in lobby.items():
-        try:
-            created = datetime.fromisoformat(room["created_at"]).timestamp()
-            if now - created > 7200:
-                to_remove.append(rid)
-        except:
-            to_remove.append(rid)
-    for rid in to_remove:
-        del lobby[rid]
-    if to_remove:
-        _save(LOBBY_FILE, lobby)
