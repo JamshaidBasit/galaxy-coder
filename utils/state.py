@@ -31,11 +31,15 @@ def default_state():
 
 @st.cache_data(ttl=60) # 1 minute tak data cache rahega, baar baar read nahi hoga
 def get_all_users():
-    """Google Sheet se data read karein with caching to avoid Quota Error"""
     try:
-        return conn.read(spreadsheet=SHEET_URL, ttl="0s")
+        df = conn.read(spreadsheet=SHEET_URL, ttl="0s")
+        if not df.empty:
+            # Username aur mission columns ko string mein convert karein taaki error na aaye
+            for col in ['username', 'completed_missions', 'earned_badges', 'earned_certs']:
+                if col in df.columns:
+                    df[col] = df[col].astype(str).replace('nan', '')
+        return df
     except Exception as e:
-        # Agar quota error aaye toh empty dataframe dein crash se bachne ke liye
         return pd.DataFrame()
 
 def load_user(username):

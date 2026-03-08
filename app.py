@@ -621,7 +621,7 @@ def page_mission():
             badge = mission["reward"].get("badge")
             updated_gs, new_badges = award_badge(updated_gs, badge)
             updated_gs, new_certs = check_certificates(updated_gs)
-            save_state(updated_gs)
+            save_user_progress(updated_gs)
 
             if leveled_up:
                 st.balloons()
@@ -1226,7 +1226,7 @@ def page_battle():
                 xp_gain = score * 20
                 updated, _, _ = add_xp(gs, xp_gain)
                 updated, new_badges = award_badge(updated, None)
-                save_state(updated)
+                save_user_progress(updated)
                 st.markdown(f"⚡ +{xp_gain} XP earned!")
                 for b in new_badges:
                     st.success(f"🏅 {b}")
@@ -1334,8 +1334,7 @@ def page_aria():
         # Input
         c_inp, c_btn = st.columns([5, 1])
         with c_inp:
-            user_msg = st.text_input("", placeholder="Ask ARIA anything about Python, errors, concepts...",
-                                      key="aria_input", label_visibility="collapsed")
+            user_msg = st.text_input("ARIA Input", label_visibility="collapsed", placeholder="Ask ARIA anything...")
         with c_btn:
             send = st.button("Send", key="aria_send", use_container_width=True)
 
@@ -1586,7 +1585,7 @@ def page_settings():
                               "battles_played": 0, "perfect_missions": 0, "hints_used": 0,
                               "current_planet": "mercury", "daily_xp": 0, "win_streak": 0,
                               "joined": gs.get("joined", "")}
-                    save_state(new_gs)
+                    save_user_progress(new_gs)
                     st.session_state.confirm_reset = False
                     st.rerun()
             with rc2:
