@@ -1636,14 +1636,12 @@ def page_multiplayer():
                 with st.spinner("ARIA is crafting unique battle questions..."):
                     try:
                         # FIX 1: Correct arguments for ARIA
-                        # Hum 'diff' ko hi topic focus bana rahe hain aur missions list pass kar rahe hain
                         user_missions = gs.get("completed_missions", [])
                         ai_qs = aria_generate_battle_questions(diff, diff, user_missions, count=5)
                 
                         if not ai_qs: raise Exception("ARIA Busy")
                     except Exception as e:
                         # FIX 2: Correct Fallback for Dictionary
-                        # Agar BATTLE_QUESTIONS dictionary hai {'beginner': [...]}, to humein list nikalni hogi
                         if isinstance(BATTLE_QUESTIONS, dict):
                             pool = BATTLE_QUESTIONS.get(diff, list(BATTLE_QUESTIONS.values())[0])
                         else:
@@ -1651,7 +1649,7 @@ def page_multiplayer():
                 
                         ai_qs = random.sample(pool, min(5, len(pool)))
         
-                # Room create karein (Ab ai_qs pass karne ki zaroorat nahi agar multiplayer.py handle kar raha hai)
+                # Room create karein
                 new_id = create_battle_room(username, avatar, diff)
                 st.session_state.mp_room_id = new_id
                 st.session_state.mp_q_idx = 0
@@ -1698,20 +1696,20 @@ def page_multiplayer():
     st.write("### 👥 Squad")
     p_cols = st.columns(4)
     for i, (p_name, p_data) in enumerate(room['players'].items()):
-        with p_cols[i]:
-            st.markdown(f"""
-            <div style="text-align:center; padding:10px; border:1px solid #38BDF8; border-radius:10px;">
-                <h3>{p_name}</h3>
-                <p>Score: {p_data['score']}</p>
-            </div>
-            """, unsafe_allow_html=True)
+        if i < 4:
+            with p_cols[i]:
+                st.markdown(f"""
+                <div style="text-align:center; padding:10px; border:1px solid #38BDF8; border-radius:10px;">
+                    <h3>{p_name}</h3>
+                    <p>Score: {p_data['score']}</p>
+                </div>
+                """, unsafe_allow_html=True)
 
     # ── BATTLE LOGIC ──
     if room['status'] == "waiting":
         st.info("Waiting for more players to join...")
         if room['host'] == username:
             if st.button("⚔️ START BATTLE", use_container_width=True):
-                # Update status in Sheets
                 from utils.multiplayer import _load_lobby_df, _save_lobby_df
                 df = _load_lobby_df()
                 df.loc[df['room_id'] == room_id, 'status'] = 'active'
@@ -1720,33 +1718,48 @@ def page_multiplayer():
         if st.button("🔄 Refresh Players"): st.rerun()
 
     elif room['status'] == "active":
-        # Question display logic (Aapke original code ke mutabiq)
         q_idx = st.session_state.mp_q_idx
-        from data.universe import BATTLE_QUESTIONS # Questions ID se fetch karein
         
-        # Room mein saved IDs se current question nikalna
-        current_q_id = room['questions'][q_idx]
-        q = next((item for item in BATTLE_QUESTIONS if str(item["id"]) == str(current_q_id)), BATTLE_QUESTIONS[0])
+        # Flatten BATTLE_QUESTIONS if it's a dict to find by ID
+        if isinstance(BATTLE_QUESTIONS, dict):
+            all_qs = []
+            for q_list in BATTLE_QUESTIONS.values():
+                all_qs.extend(q_list)
+        else:
+            all_qs = BATTLE_QUESTIONS
+        
+        # Safe fetch from room questions list
+        q_ids = room.get('questions', [])
+        if q_idx < len(q_ids):
+            current_q_id = str(q_ids[q_idx])
+            # Find question by matching ID string
+            q = next((item for item in all_qs if str(item.get("id")) == current_q_id), None)
 
-        st.subheader(f"Question {q_idx + 1}")
-        st.write(q['q'])
+            if q:
+                st.subheader(f"Question {q_idx + 1}")
+                st.write(q['q'])
 
-        answered = st.session_state.mp_answered
-        for i, opt in enumerate(q["options"]):
-            if st.button(opt, key=f"opt_{i}", use_container_width=True, disabled=(answered is not None)):
-                correct = (i == q["answer"])
-                submit_answer(room_id, username, q_idx, i, correct)
-                st.session_state.mp_answered = i
-                st.rerun()
+                answered = st.session_state.mp_answered
+                for i, opt in enumerate(q["options"]):
+                    if st.button(opt, key=f"opt_{q_idx}_{i}", use_container_width=True, disabled=(answered is not None)):
+                        correct = (i == q["answer"])
+                        submit_answer(room_id, username, q_idx, i, correct)
+                        st.session_state.mp_answered = i
+                        st.rerun()
 
-        if answered is not None:
-            if st.button("Next Question →"):
-                if q_idx + 1 < len(room['questions']):
+                if answered is not None:
+                    if st.button("Next Question →"):
+                        if q_idx + 1 < len(q_ids):
+                            st.session_state.mp_q_idx += 1
+                            st.session_state.mp_answered = None
+                        else:
+                            finish_battle(room_id, username)
+                        st.rerun()
+            else:
+                st.error("Question not found. Moving to next...")
+                if st.button("Skip"):
                     st.session_state.mp_q_idx += 1
-                    st.session_state.mp_answered = None
-                else:
-                    finish_battle(room_id, username) # Simple logic for winner
-                st.rerun()
+                    st.rerun()
 
     elif room['status'] == "finished":
         st.balloons()
