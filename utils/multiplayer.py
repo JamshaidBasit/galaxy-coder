@@ -28,45 +28,55 @@ def _save_lobby_df(df):
 
 def create_battle_room(host_name, host_avatar, difficulty="beginner"):
     """Create a new multiplayer battle room in Google Sheets"""
+    import hashlib
+    import time
+    import random
+    import pandas as pd
+    from datetime import datetime
+
     # Generate a unique 6-digit room ID
     room_id = hashlib.md5(f"{host_name}{time.time()}".encode()).hexdigest()[:6].upper()
     df = _load_lobby_df()
     
-    # Import questions from your data file
+    # Import questions
     from data.universe import BATTLE_QUESTIONS
     
-    # FIX: Handle BATTLE_QUESTIONS structure
-    # If it's a dict (e.g. {"beginner": [...]}), get the specific list
+    # Logic to get the right question pool
     if isinstance(BATTLE_QUESTIONS, dict):
         q_pool = BATTLE_QUESTIONS.get(difficulty, [])
-        # If the difficulty list is empty, fallback to the first available category
         if not q_pool:
             q_pool = list(BATTLE_QUESTIONS.values())[0]
     else:
-        # If it's already a list of dicts, filter by difficulty
         q_pool = [q for q in BATTLE_QUESTIONS if isinstance(q, dict) and q.get('difficulty') == difficulty]
 
-    # Final safety: if pool is still empty, use whatever is in BATTLE_QUESTIONS
     if not q_pool:
         q_pool = BATTLE_QUESTIONS if isinstance(BATTLE_QUESTIONS, list) else list(BATTLE_QUESTIONS.values())[0]
 
     # Select 5 random questions
     selected_qs = random.sample(q_pool, min(5, len(q_pool)))
-    q_ids = ",".join([str(q['id']) for q in selected_qs])
+    
+    # FIX: Robust ID extraction
+    # We check for 'id', then 'q_id', then fallback to a random number to prevent KeyError
+    q_ids_list = []
+    for i, q in enumerate(selected_qs):
+        actual_id = q.get('id') or q.get('q_id') or random.randint(1000, 9999)
+        q_ids_list.append(str(actual_id))
+    
+    q_ids = ",".join(q_ids_list)
 
-    # Prepare the new row for Google Sheets
+    # Prepare the row
     new_room = {
         "room_id": room_id,
         "host_name": host_name,
-        "players": host_name,        # Comma separated string for Sheets
+        "players": host_name,
         "status": "waiting",
         "questions": q_ids,
-        "scores": "0",               # Initial score for host
+        "scores": "0",
         "start_time": datetime.now().strftime("%H:%M:%S"),
         "winner": ""
     }
 
-    # Append to dataframe and save to Sheets
+    # Save to Sheets
     df = pd.concat([df, pd.DataFrame([new_room])], ignore_index=True)
     _save_lobby_df(df)
     
