@@ -211,9 +211,12 @@ def init():
             st.session_state[k] = v
 
 init()
-gs = load_state()
+# ✅ Naya Code:
+if "gs" not in st.session_state:
+    st.session_state.gs = default_state()
+gs = st.session_state.gs
 gs = check_streak(gs)
-save_state(gs)
+save_user_progress(gs)
 
 level, level_xp, level_max, level_pct = get_level_progress(gs["xp"])
 
@@ -302,7 +305,7 @@ def page_onboard():
             if uname.strip():
                 gs["username"] = uname.strip()
                 gs["avatar"] = st.session_state.get("picked_av", "🧑‍🚀")
-                save_state(gs)
+                save_user_progress(gs)
                 nav("galaxy")
             else:
                 st.warning("Commander needs a name!")
@@ -1231,7 +1234,7 @@ def page_battle():
                 st.error(f"❌ Defeated. Score: {score}/{total} ({pct}%). Train harder, Commander!")
                 gs["win_streak"] = 0
                 gs["battles_played"] = gs.get("battles_played", 0) + 1
-                save_state(gs)
+                save_user_progress(gs)
 
             if st.button("🔄 Battle Again", use_container_width=True, key="battle_again"):
                 st.session_state.battle_active = False
@@ -1526,12 +1529,12 @@ def page_settings():
                 border = "2px solid #38BDF8" if a == current_av else "none"
                 if st.button(a, key=f"set_av_{a}"):
                     gs["avatar"] = a
-                    save_state(gs)
+                    save_user_progress(gs)
                     st.rerun()
 
         if st.button("💾 Save Profile", use_container_width=True, key="save_profile"):
             gs["username"] = new_name
-            save_state(gs)
+            save_user_progress(gs)
             st.success("✅ Profile saved!")
 
         st.divider()
