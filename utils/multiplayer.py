@@ -113,7 +113,7 @@ def join_battle_room(room_id, player_name, player_avatar=None):
     return True, room_id
 
 def get_room(room_id):
-    """Get current room state from Sheets and format it like the old JSON"""
+    """Get current room state from Sheets and format it correctly"""
     df = _load_lobby_df()
     room_id = room_id.upper()
     
@@ -122,16 +122,22 @@ def get_room(room_id):
         
     row = df[df['room_id'] == room_id].iloc[0]
     
-    # Format conversion: Google Sheet string to Dictionary (taaki app.py na tootey)
     players_list = str(row['players']).split(",")
     scores_list = str(row['scores']).split(",")
     
     formatted_players = {}
     for i, p_name in enumerate(players_list):
+        # FIX: Convert to float first, THEN to int to handle '0.0'
+        try:
+            raw_score = scores_list[i] if i < len(scores_list) else "0"
+            score_val = int(float(raw_score)) 
+        except (ValueError, TypeError):
+            score_val = 0
+
         formatted_players[p_name] = {
             "name": p_name,
-            "score": int(scores_list[i]) if i < len(scores_list) else 0,
-            "ready": True if row['status'] != "waiting" else False
+            "score": score_val,
+            "ready": True if str(row['status']) != "waiting" else False
         }
 
     return {
