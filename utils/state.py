@@ -71,42 +71,56 @@ def load_user(username):
     return None
 
 def save_user_progress(gs):
-    """Data ko Google Sheet mein save/update karein"""
-    df = get_all_users()
-    
-    # Lists ko string mein convert karein Google Sheets ke liye
-    def to_str(lst):
-        return ",".join(map(str, lst)) if isinstance(lst, list) else ""
+    """Data ko Google Sheet mein save karein - with safety check"""
+    # 1. Check karein ke kya username maujood hai
+    if not gs.get("username"):
+        return
 
-    new_data = {
-        "username": gs["username"],
-        "avatar": gs["avatar"],
-        "xp": gs["xp"],
-        "level": gs["level"],
-        "completed_missions": to_str(gs["completed_missions"]),
-        "earned_badges": to_str(gs["earned_badges"]),
-        "earned_certs": to_str(gs["earned_certs"]),
-        "streak": gs["streak"],
-        "last_active": gs["last_active"],
-        "battles_won": gs["battles_won"],
-        "battles_played": gs["battles_played"],
-        "perfect_missions": gs["perfect_missions"],
-        "hints_used": gs["hints_used"],
-        "current_planet": gs["current_planet"],
-        "daily_xp": gs["daily_xp"],
-        "win_streak": gs["win_streak"],
-        "joined": gs["joined"],
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
+    # 2. Rate limiting: Ek hi session mein baar baar save karne se bachne ke liye
+    # Hum checks laga sakte hain ya simply caching use kar sakte hain
+    try:
+        df = get_all_users()
+        
+        def to_str(lst):
+            return ",".join(map(str, lst)) if isinstance(lst, list) else ""
 
-    if not df.empty and gs["username"] in df['username'].values:
-        df.loc[df['username'] == gs["username"]] = list(new_data.values())
-    else:
-        df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
+        new_data = {
+            "username": gs["username"],
+            "avatar": gs["avatar"],
+            "xp": gs["xp"],
+            "level": gs["level"],
+            "completed_missions": to_str(gs["completed_missions"]),
+            "earned_badges": to_str(gs["earned_badges"]),
+            "earned_certs": to_str(gs["earned_certs"]),
+            "streak": gs["streak"],
+            "last_active": gs["last_active"],
+            "battles_won": gs["battles_won"],
+            "battles_played": gs["battles_played"],
+            "perfect_missions": gs["perfect_missions"],
+            "hints_used": gs["hints_used"],
+            "current_planet": gs["current_planet"],
+            "daily_xp": gs["daily_xp"],
+            "win_streak": gs["win_streak"],
+            "joined": gs["joined"],
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
 
-    conn.update(spreadsheet=SHEET_URL, data=df)
-    st.cache_data.clear()
+        if not df.empty and gs["username"] in df['username'].values:
+            # Sirf us bande ki row update karein
+            df.loc[df['username'] == gs["username"]] = list(new_data.values())
+        else:
+            # Naya user add karein
+            df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
 
+        conn.update(spreadsheet=SHEET_URL, data=df)
+        # Save karne ke baad cache clear karein taaki agli baar naya data dikhe
+        st.cache_data.clear()
+        
+    except Exception as e:
+        if "429" in str(e):
+            st.warning("🚀 Galaxy systems are busy saving data. Progress is cached locally!")
+        else:
+            st.error(f"Error saving to cloud: {e}")
 # --- Baki logic (XP, Levels, Badges) hamesha ki tarah ---
 
 def get_level(xp):

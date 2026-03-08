@@ -216,7 +216,7 @@ if "gs" not in st.session_state:
     st.session_state.gs = default_state()
 gs = st.session_state.gs
 if st.session_state.get("authenticated", False):
-    save_user_progress(gs)
+    pass
 
 level, level_xp, level_max, level_pct = get_level_progress(gs["xp"])
 
