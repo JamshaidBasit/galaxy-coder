@@ -29,9 +29,14 @@ def default_state():
         "joined": str(date.today()),
     }
 
+@st.cache_data(ttl=60) # 1 minute tak data cache rahega, baar baar read nahi hoga
 def get_all_users():
-    """Google Sheet se sara data read karein"""
-    return conn.read(spreadsheet=SHEET_URL, ttl="0s")
+    """Google Sheet se data read karein with caching to avoid Quota Error"""
+    try:
+        return conn.read(spreadsheet=SHEET_URL, ttl="0s")
+    except Exception as e:
+        # Agar quota error aaye toh empty dataframe dein crash se bachne ke liye
+        return pd.DataFrame()
 
 def load_user(username):
     """Specific user ka record load karein"""
