@@ -1627,23 +1627,35 @@ def page_multiplayer():
     if not room_id:
         tab_host, tab_join, tab_browse = st.tabs(["🏠 Host Battle", "🔗 Join Battle", "🌐 Open Rooms"])
 
+        # --- Create Room Logic inside page_multiplayer ---
         with tab_host:
             st.markdown("### Create Your Battle Room")
             diff = st.selectbox("Difficulty:", ["beginner", "intermediate", "advanced"], key="mp_diff")
-            
+    
             if st.button("🚀 Create Room", use_container_width=True):
-                # Room create karte waqt ARIA se questions generate karwana
                 with st.spinner("ARIA is crafting unique battle questions..."):
                     try:
-                        # Agar AI fail ho toh fallback to BATTLE_QUESTIONS
-                        ai_qs = aria_generate_battle_questions(diff, count=5)
-                        if not ai_qs: raise Exception("ARIA Busy")
-                    except:
-                        ai_qs = random.sample(BATTLE_QUESTIONS, 5)
+                        # FIX 1: Correct arguments for ARIA
+                        # Hum 'diff' ko hi topic focus bana rahe hain aur missions list pass kar rahe hain
+                        user_missions = gs.get("completed_missions", [])
+                        ai_qs = aria_generate_battle_questions(diff, diff, user_missions, count=5)
                 
+                        if not ai_qs: raise Exception("ARIA Busy")
+                    except Exception as e:
+                        # FIX 2: Correct Fallback for Dictionary
+                        # Agar BATTLE_QUESTIONS dictionary hai {'beginner': [...]}, to humein list nikalni hogi
+                        if isinstance(BATTLE_QUESTIONS, dict):
+                            pool = BATTLE_QUESTIONS.get(diff, list(BATTLE_QUESTIONS.values())[0])
+                        else:
+                            pool = BATTLE_QUESTIONS
+                
+                        ai_qs = random.sample(pool, min(5, len(pool)))
+        
+                # Room create karein (Ab ai_qs pass karne ki zaroorat nahi agar multiplayer.py handle kar raha hai)
                 new_id = create_battle_room(username, avatar, diff)
                 st.session_state.mp_room_id = new_id
                 st.session_state.mp_q_idx = 0
+                st.session_state.mp_answered = None
                 st.rerun()
 
         with tab_join:
