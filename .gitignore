@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+galaxy_coder_save.json
+battle_lobby.json
+multiplayer_battles.json
